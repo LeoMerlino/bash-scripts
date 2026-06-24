@@ -1,147 +1,145 @@
 #!/usr/bin/env bash
-# shellcheck disable=SC2016
 
 print_usage() {
-    echo "Usage: $0 [command] [-d <delimiter>] [-c <concurrency>] [-p]"
-    echo "Tile processeses parallelised by xargs in a tmux session"
-    echo "Commands to provide input items and process them will"
-    echo "be read from the user during script execution"
+    echo "Usage: $0 [OPTIONS] -e <processor_command> [FILE...]"
+    echo "Tile processes parallelised by xargs in a tmux session."
+    echo "Cannot attach automatically if input is piped via stdin."
+    echo "Press Ctrl + C on the progress indicator tile to stop all operations"
     echo
-    echo "Args:"
-    echo "  -d  select the delimiter that seperates the items provided by the input command"
-    echo "      newline    use a newline as the delimiter"
-    # shellcheck disable=SC2028
-    echo "      null       use a null character (\0) as the delimiter"
-    echo "      custom     use whatever is supplied in place of custom as the delimiter"
-    echo "  -t  max processes to run in parallel"
-    echo "  -p  prompt before running each command"
+    echo "You can pass items as arguments or pipe them via stdin:"
+    echo "Example: ls *.mp3 | $0 -c 4 -e 'chmod +x \"\$1\"'"
+    echo "Or via file:"
+    echo "Example: $0 -c 4 -e 'chmod +x \"\$1\"' files.txt"
     echo
-    echo "Examples:"
-    echo "  $0 -d % -c 16         use '%' as the delimiter and run 16 processes in parallel"
-    echo "  $0 -d null -c 3 -p    use a null character as the delimiter,"
-    echo "                        run 3 processes in parallel and prompt before each command"
+    echo "Options:"
+    echo "  -e  (REQUIRED) Command to execute per item. Use '\$1' as the item variable"
+    echo "  -d  Delimiter: 'newline', 'null', or a custom character"
+    echo "  -c  Max processes to run in parallel (concurrency)"
+    echo "  -h  Show this help text"
     exit 0
 }
 
-while getopts 'd:c:ph' opt; do
+# Default vars
+threads=1
+xargs_args=()
+processor_cmd=""
+count_delim=$'\n'
+
+while getopts 'e:d:c:nh' opt; do
     case "$opt" in
+    e) processor_cmd="$OPTARG" ;;
     d)
-        case "$OPTARG" in
-        newline)
-            delim=''                                  # Needs to be something to detect if the user supplied the arg
-            echo "Picking a newline as the delimiter" # Default so we don't have to assign anything
-            ;;
-        null)
-            delim="-0"
-            echo "Picking a null character as the delimiter"
-            ;;
-        *)
-            delim="-d'$OPTARG'"
-            echo "Picking '$OPTARG' as the delimiter"
-            ;;
-        esac
+        if [[ "$OPTARG" == "newline" ]]; then
+            xargs_args+=("-d" $'\n')
+            count_delim=$'\n'
+        elif [[ "$OPTARG" == "null" ]]; then
+            xargs_args+=("-0")
+            count_delim='\0'
+        else
+            xargs_args+=("-d" "$OPTARG")
+            count_delim="$OPTARG"
+        fi
         ;;
     c)
-        case "$OPTARG" in
-        '' | *[!0-9]*)
-            echo "The '-c' flag must be a number"
-            print_usage
-            ;;
-        *)
-            echo "Running $OPTARG processes in parallel"
+        if [[ "$OPTARG" =~ ^[0-9]+$ ]]; then
             threads="$OPTARG"
-            ;;
-        esac
+        else
+            echo "Error: '-c' flag must be a number" >&2
+            exit 1
+        fi
         ;;
-    p)
-        echo "Will prompt before each command"
-        prompt='-p'
-        ;;
-    h)
-        print_usage
-        ;;
-    *)
-        echo "Invalid usage"
-        print_usage
-        ;;
+    h) print_usage ;;
+    *) print_usage ;;
     esac
 done
-if [ -z "${delim+x}" ] || [ -z "${threads+x}" ]; then # Are they both set?
-    echo "Error: missing arguments"
+shift $((OPTIND - 1))
+
+if [[ -z "$processor_cmd" ]]; then
+    echo "Error: Missing required processor command (-e)" >&2
+    print_usage
+fi
+items="$(mktemp)"
+processor_file="$(mktemp)"
+progress_file="$(mktemp)"
+progress_lock="$(mktemp)"
+watch_progress_script="$(mktemp)"
+# Write processor command to file
+echo "$processor_cmd" >"$processor_file"
+# If more than 0 extra args are given (input files)
+if [[ $# -gt 0 ]]; then
+    # Copy contents of input file(s) to temp file
+    cat "$@" >"$items"
+# Check if stdin is not a terminal
+elif [[ ! -t 0 ]]; then
+    # Read from stdin
+    cat >"$items"
+else
+    echo "Error: No items provided via stdin or arguments" >&2
     print_usage
 fi
 
-echo 'Command providing items to work on. E.g., `ls *.mp3` (use Ctrl + D to end input)'
-items="$(mktemp)"
-eval "$(</dev/stdin)" >"$items"
-
-echo 'Enter the command to process the items. Use `$0` as the input for each item.'
-echo 'For example: `chmod +x $0` (use Ctrl + D to end input)'
-processor_file="$(mktemp)"
-<<<"$(</dev/stdin)" cat >"$processor_file"
-
 tmux_session="parallelise-$$"
-export tmux_session
-tmux new-session -d -s "$tmux_session"
-progress_file="$(mktemp)"
 
 cleanup() {
-    rm -f "$watch_progress" "$progress_file" "$items" "$processor_file"
-    if tmux list-sessions -f "$tmux_session" >/dev/null 2>&1; then
+    rm -f "$watch_progress_script" "$progress_file" "$items" "$processor_file" "$progress_lock"
+    kill "$xargs_pid" 2>/dev/null
+    # Check if the tmux session actually exists
+    if tmux has-session -t "$tmux_session" 2>/dev/null; then
         tmux kill-session -t "$tmux_session"
     fi
 }
-
+# Run cleanup on exit via ctrl+c, etc.
 trap 'cleanup' EXIT SIGINT
 
-case "$delim" in
-'')
-    <"$items" wc -l >"$progress_file"
-    ;;
-'-0')
-    <"$items" tr -cd '\0' | wc -c >"$progress_file"
-    ;;
-*)
-    <"$items" tr -cd "$delim" | wc -c >"$progress_file"
-    ;;
-esac
-watch_progress="$(mktemp)"
-# TODO: Work out how to only send one variable
-printf '
+# Count initial processes and write to progress file
+# Progress file will just contain the amount of processes left to finish
+<"$items" tr -cd "$count_delim" | wc -c >"$progress_file"
+
+cat <<EOF >"$watch_progress_script"
 clear
 set -eo pipefail
-while :; do
-    inotifywait -qe modify %s | while read; do
-        clear
-        printf "\rProcesses left: $(cat %s)"
-    done
-done' "$progress_file" "$progress_file" >"$watch_progress"
+trap 'cat /tmp/xargs_pid_$$ | xargs kill 2>/dev/null' EXIT SIGINT
+printf "\e[H\e[2JProcesses left:\n"
+figlet "\$(cat "$progress_file")"
+inotifywait -m -q -e modify "$progress_file" | while read -r _ _ _; do
+    printf "\e[H\e[2JProcesses left:\n"
+    figlet "\$(cat "$progress_file")"
+done
+EOF
 
-tmux send-keys -t "$tmux_session" "bash $watch_progress" Enter
+tmux new-session -d -s "$tmux_session"
+tmux send-keys -t "$tmux_session" "bash $watch_progress_script" Enter
 
-echo "New session created: $tmux_session"
-echo "Attach with: tmux a $tmux_session"
-read -rp 'Attach in new kitty window? [y/N] ' choice
-if [ "$choice" = 'y' ]; then
-    kitty --detach=y -- tmux a -t "$tmux_session"
-fi
-export progress_file items processor_file tmux_session
-read -rp 'Press enter to run... '
-# The first two variables must be unquoted otherwise if they are empty, xargs will interpret it as an argument
-cat <<'EOF' | xargs $prompt $delim -l -r -P"$threads" bash -c "$(cat)" <"$items"
+# Export variables needed by xargs subshells
+export progress_file items processor_file tmux_session progress_lock
+cat <<'EOF' | xargs "${xargs_args[@]}" -l -r -P"$threads" bash -c "$(cat)" <"$items" &
 id=$$
+# Gotta sleep otherwise tmux doesn't tile quickly enough
 sleep "$(awk -v r=$RANDOM 'BEGIN { printf "%.3f", r/32767 }')"
-
-# Safely escape the item name ($0) so spaces/special chars don't break the tmux command
-escaped_item=$(printf '%q' "$0")
-
+tmux has-session -t "$tmux_session" 2>/dev/null || exit 1
 tmux split-window -t "$tmux_session" -h "
-    bash -c \"\$(cat '$processor_file')\" $escaped_item || { read -rp '[ERROR] PROCESS FAILED '; tmux wait-for -S $id; exit 1; }
+    bash '$processor_file' '$0' || { read -rp '[ERROR] PROCESS FAILED '; tmux wait-for -S $id; exit 1; }
     echo 'Process finished successfully!'
     sleep 1
     tmux wait-for -S $id" &&
 tmux select-layout -t "$tmux_session" tiled
 tmux wait-for "$id"
-echo $(($(cat "$progress_file")-1)) > "$progress_file"
+
+# Set progress_lock to fd 200 then lock the file with flock
+# Makes sure that files aren't accessed at the same time
+(
+    flock 200
+    current_count=$(cat "$progress_file" 2>/dev/null)
+    echo $((current_count - 1)) > "$progress_file"
+) 200> "$progress_lock"
 EOF
-cleanup
+xargs_pid=$!
+echo $xargs_pid >/tmp/xargs_pid_$$
+# Cor the cleanup function
+export xargs_pid
+if [ -t 0 ]; then
+    tmux a -t "$tmux_session"
+else
+    echo "Can't attatch automatically, run \`tmux a -t $tmux_session\` in another window or just \`tmux a\` if you don't have any sessions running."
+fi
+wait

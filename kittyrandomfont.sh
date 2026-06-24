@@ -1,6 +1,5 @@
 #!/bin/bash
 font=$(cat <<'EOF' | shuf -n1
-ProFont IIx Nerd Font Mono
 RecMonoCasual Nerd Font
 SeriousShanns Nerd Font Mono
 MonaspiceRn Nerd Font Mono
