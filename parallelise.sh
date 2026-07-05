@@ -7,9 +7,9 @@ print_usage() {
     echo "Press Ctrl + C on the progress indicator tile to stop all operations"
     echo
     echo "You can pass items as arguments or pipe them via stdin:"
-    echo "Example: ls *.mp3 | $0 -c 4 -e 'chmod +x \"\$1\"'"
+    echo "Example: cat files | $0 -d newline -c 4 -e 'chmod +x \"\$1\"'"
     echo "Or via file:"
-    echo "Example: $0 -c 4 -e 'chmod +x \"\$1\"' files.txt"
+    echo "Example: $0 -d null -c 4 -e 'chmod +x \"\$1\"' files.txt"
     echo
     echo "Options:"
     echo "  -e  (REQUIRED) Command to execute per item. Use '\$1' as the item variable"
@@ -18,7 +18,7 @@ print_usage() {
     echo "  -h  Show this help text"
     exit 0
 }
-
+set -x
 # Default vars
 threads=1
 xargs_args=()
@@ -98,10 +98,15 @@ trap 'cleanup' EXIT SIGINT
 cat <<EOF >"$watch_progress_script"
 clear
 set -eo pipefail
-trap 'cat /tmp/xargs_pid_$$ | xargs kill 2>/dev/null' EXIT SIGINT
+cleanup () {
+    cat /tmp/xargs_pid_$$ | xargs kill 2>/dev/null
+    exit
+}
+trap 'cleanup' EXIT SIGINT
 printf "\e[H\e[2JProcesses left:\n"
 figlet "\$(cat "$progress_file")"
 inotifywait -m -q -e modify "$progress_file" | while read -r _ _ _; do
+    [ "\$(cat "$progress_file")" -eq 0 ] && cleanup
     printf "\e[H\e[2JProcesses left:\n"
     figlet "\$(cat "$progress_file")"
 done
@@ -112,6 +117,7 @@ tmux send-keys -t "$tmux_session" "bash $watch_progress_script" Enter
 
 # Export variables needed by xargs subshells
 export progress_file items processor_file tmux_session progress_lock
+export TERM=xterm-256color
 cat <<'EOF' | xargs "${xargs_args[@]}" -l -r -P"$threads" bash -c "$(cat)" <"$items" &
 id=$$
 # Gotta sleep otherwise tmux doesn't tile quickly enough
@@ -139,6 +145,7 @@ echo $xargs_pid >/tmp/xargs_pid_$$
 export xargs_pid
 if [ -t 0 ]; then
     tmux a -t "$tmux_session"
+    # :
 else
     echo "Can't attatch automatically, run \`tmux a -t $tmux_session\` in another window or just \`tmux a\` if you don't have any sessions running."
 fi

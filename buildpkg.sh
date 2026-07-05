@@ -1,24 +1,58 @@
 #!/bin/bash
 # shellcheck disable=SC2016
+set -x
+NUM_CORES=$(nproc)
 
-LIST=/tmp/buildpkglist
-# awk command: don't print lines where "g" (binary package) is present in $1, 
-# and only print $2 if "/" is present (check if its a package name)
-test -e $LIST || emerge --pretend --getbinpkg --update \
-						--deep --changed-use --color=n  \
-						--columns --quiet=y world        \
-						| awk '$1 !~ /g/ && $2 ~ /\// {print $2}' > $LIST;
+# awk command: don't print lines where "g" (binary package) is present in $1,
+# and only print $2 if "/" is present (check if it's a package atom)
+test -e /tmp/pkglist || emerge --pretend --getbinpkg --update \
+    --deep --changed-use --color=n \
+    --columns --quiet=y world |
+    awk '$1 !~ /g/ && $2 ~ /\// {print $2}' >/tmp/pkglist
 
-build () {
-	if [ -e /var/cache/binpkgs/"$0" ]; then
-		echo "Binary package already built for $0..."
-		return 0
-	fi
-	printf "Building binary package for %s... " "$0"
-	MAKEOPTS="-j4"               \
-	emerge --update --changed-use \
-		   --quiet-build --quiet=y \
-		   --buildpkgonly "$0"
+rm /tmp/smallpkglist /tmp/mediumpkglist /tmp/largepkglist
+cp /tmp/pkglist /tmp/newpkglist
+
+qlop -a -m -M $(cat /tmp/pkglist) | sort -k 2,2 -n | while read -r pkg; do
+    NAME=$(<<<"$pkg" cut -d: -f1)
+    if [ "$(cut -d' ' -f2 <<<"$pkg")" -lt 20 ]; then
+        echo "$NAME" >>/tmp/smallpkglist
+    elif [ "$(cut -d' ' -f2 <<<"$pkg")" -lt 240 ]; then
+        echo "$NAME" >>/tmp/mediumpkglist
+    else
+        echo "$NAME" >>/tmp/largepkglist
+    fi
+    LINE=$(grep -Fn "$NAME" /tmp/newpkglist | cut -d: -f1)
+    sed -i "${LINE}d" /tmp/newpkglist
+done
+
+build() {
+    if [ -e /var/cache/binpkgs/"$1" ]; then
+        echo "Binary package already built for $1..."
+        return 0
+    fi
+    printf "Building binary package for %s... " "$1"
+    emerge --update --changed-use \
+        --quiet-build --quiet=y \
+        --buildpkgonly "$1"
 }
 export -f build
-cat $LIST - <<<"$@" | xargs -r -P8 -l bash -c 'build $0'
+echo "Building small packages..."
+export MAKEOPTS="-j1"
+/opt/scripts/parallelise.sh -c "$NUM_CORES" -d newline -e 'build $1' /tmp/smallpkglist
+
+echo "Building medium packages..."
+JOBS="$((NUM_CORES / 4))"
+export MAKEOPTS="-j$((NUM_CORES / JOBS))"
+/opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/mediumpkglist
+
+echo "Building large packages..."
+export MAKEOPTS="-j$NUM_CORES"
+cat /tmp/largepkglist | while read -r pkg; do
+    build "$pkg"
+done
+
+echo "Building new packages..."
+JOBS="$((NUM_CORES / 8))"
+export MAKEOPTS="-j$((NUM_CORES / JOBS))"
+/opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/newpkglist
