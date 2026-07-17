@@ -4,7 +4,7 @@ print_usage() {
     echo "Usage: $0 [OPTIONS] -e <processor_command> [FILE...]"
     echo "Tile processes parallelised by xargs in a tmux session."
     echo "Cannot attach automatically if input is piped via stdin."
-    echo "Press Ctrl + C on the progress indicator tile to stop all operations"
+    echo "Press Ctrl + C on the progress indicator tile to stop all operations."
     echo
     echo "You can pass items as arguments or pipe them via stdin:"
     echo "Example: cat files | $0 -d newline -c 4 -e 'chmod +x \"\$1\"'"
@@ -18,7 +18,6 @@ print_usage() {
     echo "  -h  Show this help text"
     exit 0
 }
-set -x
 # Default vars
 threads=1
 xargs_args=()
