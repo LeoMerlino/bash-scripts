@@ -3,12 +3,13 @@
 set -x
 NUM_CORES=$(nproc)
 
-# awk command: don't print lines where "g" (binary package) is present in $1,
-# and only print $2 if "/" is present (check if it's a package atom)
-test -e /tmp/pkglist || emerge --pretend --getbinpkg --update \
-    --deep --changed-use --color=n \
-    --columns --quiet=y world |
-    awk '$1 !~ /g/ && $2 ~ /\// {print $2}' >/tmp/pkglist
+# Remove binary packages from the list, tail to remove human lines we don't want and grep to filter package names
+test -e /tmp/pkglist || emerge --pretend --getbinpkg --update   \
+                               --deep --changed-use --color=n    \
+                               --usepkg world | grep -v '.binary' |
+                                                tail +8           |
+                                                grep -oE '[[:alnum:]_+.-]+/[[:alnum:]_+.-]+' \
+                                                >/tmp/pkglist
 
 rm /tmp/smallpkglist /tmp/mediumpkglist /tmp/largepkglist
 cp /tmp/pkglist /tmp/newpkglist
@@ -34,7 +35,7 @@ build() {
     printf "Building binary package for %s... " "$1"
     emerge --update --changed-use \
         --quiet-build --quiet=y \
-        --buildpkgonly "$1"
+        --buildpkgonly "$1" ||:
 }
 export -f build
 echo "Building small packages..."
