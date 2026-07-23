@@ -96,10 +96,9 @@ trap 'cleanup' EXIT SIGINT
 
 cat <<EOF >"$watch_progress_script"
 clear
-set -eo pipefail
 cleanup () {
     cat /tmp/xargs_pid_$$ | xargs kill 2>/dev/null
-    exit
+    tmux kill-session -t  $tmux_session
 }
 trap 'cleanup' EXIT SIGINT
 printf "\e[H\e[2JProcesses left:\n"
