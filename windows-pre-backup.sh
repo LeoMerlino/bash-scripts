@@ -5,7 +5,8 @@ EXCLUDE_FILE="/tmp/restic-large-dirs.txt"
 if test -e $EXCLUDE_FILE; then
 	rm $EXCLUDE_FILE
 fi
-mount -r UUID=D42E8CE92E8CC648 /windows || echo "Windows is already mounted"
+mkdir -p /run/media/leo/Windows/
+mount -r UUID=D42E8CE92E8CC648 /run/media/leo/Windows/ || echo "Windows is already mounted"
 
 for folder in $@; do
 	SOURCE="$folder"

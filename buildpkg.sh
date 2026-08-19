@@ -1,8 +1,7 @@
 #!/bin/bash
 # shellcheck disable=SC2016
-set -x
 NUM_CORES=$(nproc)
-
+set -x
 # Remove binary packages from the list, tail to remove human lines we don't want and grep to filter package names
 test -e /tmp/pkglist || emerge --pretend --getbinpkg --update   \
                                --deep --changed-use --color=n    \
