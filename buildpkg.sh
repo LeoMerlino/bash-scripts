@@ -3,15 +3,16 @@
 NUM_CORES=$(nproc)
 set -x
 # Remove binary packages from the list, tail to remove human lines we don't want and grep to filter package names
-test -e /tmp/pkglist || emerge --pretend --getbinpkg --update   \
-                               --deep --changed-use --color=n    \
-                               --usepkg world | grep -v '.binary' |
-                                                tail +8           |
-                                                grep -oE '[[:alnum:]_+.-]+/[[:alnum:]_+.-]+' \
+test -e /tmp/pkglist || emerge --pretend --getbinpkg --update                                    \
+                               --deep --changed-use --color=n                                     \
+                               --usepkg world --changed-deps=y                                     |
+                                                grep -v '.binary'                                  |
+                                                tail +8                                            |
+                                                grep -oP '(?<!:)[[:alnum:]_+.-]+/[[:alnum:]_+.-]+' \
                                                 >/tmp/pkglist
 
 rm /tmp/smallpkglist /tmp/mediumpkglist /tmp/largepkglist
-cp /tmp/pkglist /tmp/newpkglist
+cat /tmp/pkglist | sed 's/^/=/g' >/tmp/newpkglist
 
 qlop -a -m -M $(cat /tmp/pkglist) | sort -k 2,2 -n | while read -r pkg; do
     NAME=$(<<<"$pkg" cut -d: -f1)
@@ -22,8 +23,9 @@ qlop -a -m -M $(cat /tmp/pkglist) | sort -k 2,2 -n | while read -r pkg; do
     else
         echo "$NAME" >>/tmp/largepkglist
     fi
-    LINE=$(grep -Fn "$NAME" /tmp/newpkglist | cut -d: -f1)
-    sed -i "${LINE}d" /tmp/newpkglist
+    grep -Fn "$NAME" /tmp/newpkglist | cut -d: -f1 | while read -r LINE; do
+        sed -i "${LINE}d" /tmp/newpkglist
+    done
 done
 
 build() {
@@ -34,25 +36,34 @@ build() {
     printf "Building binary package for %s... " "$1"
     emerge --update --changed-use \
         --quiet-build --quiet=y \
-        --buildpkgonly "$1" ||:
+        --buildpkgonly "${1%-*}"
 }
 export -f build
-echo "Building small packages..."
-export MAKEOPTS="-j1"
-/opt/scripts/parallelise.sh -c "$NUM_CORES" -d newline -e 'build $1' /tmp/smallpkglist
 
-echo "Building medium packages..."
-JOBS="$((NUM_CORES / 4))"
-export MAKEOPTS="-j$((NUM_CORES / JOBS))"
-/opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/mediumpkglist
+test -e /tmp/smallpkglist && {
+    echo "Building small packages..."
+    export MAKEOPTS="-j1"
+    /opt/scripts/parallelise.sh -c "$NUM_CORES" -d newline -e 'build $1' /tmp/smallpkglist
+}
 
-echo "Building large packages..."
-export MAKEOPTS="-j$NUM_CORES"
-cat /tmp/largepkglist | while read -r pkg; do
-    build "$pkg"
-done
+test -e /tmp/mediumpkglist && {
+    echo "Building medium packages..."
+    JOBS="$((NUM_CORES / 4))"
+    export MAKEOPTS="-j$((NUM_CORES / JOBS))"
+    /opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/mediumpkglist
+}
 
-echo "Building new packages..."
-JOBS="$((NUM_CORES / 8))"
-export MAKEOPTS="-j$((NUM_CORES / JOBS))"
-/opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/newpkglist
+test -e /tmp/largepkglist && {
+    echo "Building large packages..."
+    export MAKEOPTS="-j$NUM_CORES"
+    cat /tmp/largepkglist | while read -r pkg; do
+        build "$pkg"
+    done
+}
+
+test -e /tmp/newpkglist && {
+    echo "Building new packages..."
+    JOBS="$((NUM_CORES / 8))"
+    export MAKEOPTS="-j$((NUM_CORES / JOBS))"
+    /opt/scripts/parallelise.sh -c "$JOBS" -d newline -e 'build $1' /tmp/newpkglist
+}
