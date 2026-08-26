@@ -15,6 +15,7 @@ print_usage() {
     echo "  -e  (REQUIRED) Command to execute per item. Use '\$1' as the item variable"
     echo "  -d  Delimiter: 'newline', 'null', or a custom character"
     echo "  -c  Max processes to run in parallel (concurrency)"
+    echo "  -t  Title to show in the progress indicator tile"
     echo "  -h  Show this help text"
     exit 0
 }
@@ -24,7 +25,7 @@ xargs_args=()
 processor_cmd=""
 count_delim=$'\n'
 
-while getopts 'e:d:c:nh' opt; do
+while getopts 'e:d:c:t:nh' opt; do
     case "$opt" in
     e) processor_cmd="$OPTARG" ;;
     d)
@@ -47,6 +48,7 @@ while getopts 'e:d:c:nh' opt; do
             exit 1
         fi
         ;;
+    t) title="$OPTARG" ;;
     h) print_usage ;;
     *) print_usage ;;
     esac
@@ -102,11 +104,13 @@ cleanup () {
 }
 trap 'cleanup' EXIT SIGINT
 printf "\e[H\e[2JProcesses left:\n"
-figlet "\$(cat "$progress_file")"
+cat "$progress_file" | figlet
+test -n "$title" && echo "$title"
 inotifywait -m -q -e modify "$progress_file" | while read -r _ _ _; do
     [ "\$(cat "$progress_file")" -eq 0 ] && cleanup
     printf "\e[H\e[2JProcesses left:\n"
-    figlet "\$(cat "$progress_file")"
+    cat "$progress_file" | figlet
+    test -n "$title" && echo "$title"
 done
 EOF
 
