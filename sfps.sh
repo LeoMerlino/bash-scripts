@@ -26,6 +26,7 @@ while getopts "hlt:r:c:p:" opt; do
     esac
 done
 concurrency="${concurrency:-254}"
+
 timeout="${timeout:-0.2}"
 port="${port:-80}"
 if  [[ $local_scan -eq 1 || -n "$range" ]] && \
@@ -66,7 +67,7 @@ for addr in "${addrs[@]}"; do
         new_addrs+=("$addr:$port")
     done
 done
-
+#shellcheck disable=SC2329
 check() {
     IFS=':' read -r host port <<< "$1"
     [ -n "$DRY" ] && {
@@ -80,3 +81,5 @@ check() {
 
 export -f check
 printf '%s\0' "${new_addrs[@]}" | xargs -0 -P"$concurrency" -I{} timeout "$timeout" bash -c "check {} $port 2>/dev/null"
+
+exit 0

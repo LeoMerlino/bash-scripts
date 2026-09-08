@@ -1,5 +1,5 @@
 #!/bin/env bash
-trap 'tput cnorm' EXIT INT TERM
+trap 'tput cnorm && exit 1' EXIT INT TERM
 tput sc
 tput civis
 titles=()
