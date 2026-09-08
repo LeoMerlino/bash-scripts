@@ -12,3 +12,6 @@ Scan ports very fast
 #### Example:
 
 <img width="897" height="1007" alt="sfps" src="https://github.com/user-attachments/assets/73f56142-ceb0-407e-aed8-20847aa54b12" />
+
+#### Crappy benchmark for best params on a LAN:
+https://docs.google.com/spreadsheets/d/1PKNI2rHJtkQrkDYOIf7fao87dt7SVIYa9kHsanDEHCY/edit?usp=sharing
