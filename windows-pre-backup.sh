@@ -6,7 +6,7 @@ if test -e $EXCLUDE_FILE; then
 	rm $EXCLUDE_FILE
 fi
 mkdir -p /run/media/leo/Windows/
-mount -r UUID=D42E8CE92E8CC648 /run/media/leo/Windows/ || echo "Windows is already mounted"
+mount -r UUID=BE121197121155AD /run/media/leo/Windows/ || echo "Windows is already mounted"
 
 for folder in $@; do
 	SOURCE="$folder"

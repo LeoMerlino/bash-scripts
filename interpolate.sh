@@ -2,13 +2,34 @@
 set -eo pipefail
 
 TMP_DIR=$(mktemp -d /tmp/rife-interp.XXXXXX)
+
+log () {
+    echo "$@"
+    qdbus6 $dbusRef setLabelText "$@"
+    curr_step=$((curr_step + 1))
+    qdbus6 $dbusRef Set "" value "$curr_step"
+}
 clean() {
+    log "Cleaning up"
+    rm -rf "$TMP_DIR"
+    qdbus6 $dbusRef close
+}
+cancelled () {
+    trap - EXIT
+    kill $job 2>/dev/null || kill $$
     rm -rf "$TMP_DIR"
 }
-trap 'clean' EXIT SIGINT
+show_error () {
+    kdialog --textbox "$TMP_DIR/log.txt" 1024 512
+    cancelled
+}
+
+trap 'clean' EXIT
+
 
 mult_arg="$1"
 custom_fps=""
+curr_step=0
 
 if [ "$mult_arg" = "custom" ]; then
     custom_fps=$(qarma --entry --width 25 --text='New frame rate' --int='60')
@@ -22,15 +43,18 @@ elif [ -z "$mult_arg" ]; then
 fi
 
 shift
-
-for file in "$@"; do
+steps=$(($# * 3))
+dbusRef=$(kdialog --progressbar "Initializing" $steps)
+(
+    trap 'show_error' ERR
+    for file in "$@"; do
     [ ! -f "$file" ] && continue
-    echo "==> Processing: $file"
 
     in_frames="$TMP_DIR/input_frames"
     out_frames="$TMP_DIR/output_frames"
     mkdir -p "$in_frames" "$out_frames"
 
+    log "Extracting frames from $file"
     ffmpeg -hide_banner -loglevel error -y -i "$file" "$in_frames/%08d.png"
     num_frames=$(find "$in_frames" -name "*.png" | wc -l)
 
@@ -52,14 +76,14 @@ for file in "$@"; do
 
     threads=$(($(nproc) / 3))
     threads=$((threads < 1 ? 1 : threads))
-
+    log "Running RIFE interpolator"
     "$(dirname "$0")/rife/rife-ncnn-vulkan" \
         -i "$in_frames"                      \
         -o "$out_frames"                      \
         -m "$(dirname "$0")/rife/rife-v4.6/"   \
         -n "$target_frames"                     \
         -j "$threads:$threads:$threads"
-
+    log "Encoding output video"
     output_video="${file%.*}_interpolated.mp4"
     ffmpeg -hide_banner -loglevel error -y \
         -framerate "$target_fps"            \
@@ -73,6 +97,14 @@ for file in "$@"; do
         -crf 30                                     \
         -pix_fmt yuv420p                             \
         "$output_video"
-
-    rm -rf "$in_frames" "$out_frames"
 done
+) 2>&1 | tee "$TMP_DIR/log.txt" &
+
+job=$!
+
+until ! qdbus6 $dbusRef >/dev/null 2>&1; do
+    sleep 0.5
+done
+if test -d /proc/$job; then
+    cancelled
+fi
