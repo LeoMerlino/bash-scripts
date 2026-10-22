@@ -13,6 +13,7 @@ clean() {
     log "Cleaning up"
     rm -rf "$TMP_DIR"
     qdbus6 $dbusRef close
+    notify-send -a Success "Compression finished" -i emblem-checked
 }
 cancelled () {
     trap - EXIT
@@ -20,6 +21,7 @@ cancelled () {
     rm -rf "$TMP_DIR"
 }
 show_error () {
+
     kdialog --textbox "$TMP_DIR/log.txt" 1024 512
     cancelled
 }

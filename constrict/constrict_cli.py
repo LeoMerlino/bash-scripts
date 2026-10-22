@@ -27,6 +27,7 @@ from typing import Optional
 import mimetypes
 import tempfile
 import os
+import sys
 
 if __name__ == '__main__':
     arg_parser = argparse.ArgumentParser("constrict-cli")
@@ -243,6 +244,7 @@ if __name__ == '__main__':
     if type(compression_result) is str:
         print('\n\n*** COMPRESSION ERROR ***')
         print(compression_result)
+        sys.exit(1)
     elif type(compression_result) is int:
         end_size_bytes = compression_result
         end_size_mb = round(end_size_bytes / 1024 / 1024, 1)
